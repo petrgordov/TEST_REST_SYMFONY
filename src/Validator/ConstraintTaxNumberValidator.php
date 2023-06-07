@@ -40,8 +40,6 @@ class ConstraintTaxNumberValidator extends ConstraintValidator
 
         }
 
-
-
         if (!preg_match('/^[a-zA-Z]{2}(([a-zA-Z]{2})?([0-9]+))$/', $value, $matches)) {
             // the argument must be a string or an object implementing __toString()
             $this->context->buildViolation($constraint->message)

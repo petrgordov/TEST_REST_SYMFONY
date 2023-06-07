@@ -7,6 +7,7 @@ use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Annotation\Route;
+use Symfony\Flex\Response;
 
 class RestApiController extends AbstractController
 {
@@ -27,11 +28,11 @@ class RestApiController extends AbstractController
         return $restapi->{$method}();
     }
 
-    #[Route('/rest/{method}/{id}', name: 'app__rest_api_get_id', methods: 'GET')]
-    public function get_method_id(string $method, int $id, Api $restapi): JsonResponse
+    #[Route('/rest/{method}/{id<\d+>}', name: 'app__rest_api_get_id', methods: 'GET',)]
+    public function get_method_id(string $method, int $id, Api $restapi, Request $request): JsonResponse
     {
 //        dump($em);
-        return $restapi->{$method}($id);
+        return $restapi->{$method}($id,$request->query->get('taxNumber') ?? '');
     }
 
     #[Route('/rest/{method}', name: 'app__rest_api_post', methods: 'POST')]

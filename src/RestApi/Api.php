@@ -29,7 +29,7 @@ class Api
         ],400);
     }
 
-    public function Product(int $id): JsonResponse
+    public function Product(int $id,string $taxNumber): JsonResponse
     {
 
         try{
@@ -48,11 +48,9 @@ class Api
                 throw new \Exception();
             }
 
-            $data=$product[0];
+            Pricing::BasePrice($product[0]['price'],$taxNumber);
 
-//            $data['price']=Pricing::BasePrice($data['price']);
-
-            return new JsonResponse($data,200);
+            return new JsonResponse($product[0],200);
 
         }catch (\Exception $e){
 
