@@ -3,63 +3,75 @@
 namespace App\RestApi;
 
 use App\Catalog\Pricing;
+use App\Entity\Cart;
+use App\Entity\Coupons;
 use App\Entity\Order;
 use App\Entity\Products;
-use App\Validator\ConstraintTaxNumber;
-use App\Validator\ConstraintTaxNumberValidator;
+use App\PaymentProcessor\PayData;
+use App\PaymentProcessor\Payment;
+use App\Validator as TaxAssert;
 use Symfony\Component\Validator\Validator\ValidatorInterface;
-use Symfony\Component\Validator\Mapping\ClassMetadata;
-use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\Persistence\ManagerRegistry;
-use App\Repository\ProductsRepository;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\HttpFoundation\Response;
-
+use Symfony\Component\Uid\Uuid;
 
 class Api
 {
 
-    public function __construct(private ManagerRegistry $doctrine,private ValidatorInterface $validator) {}
+    #[TaxAssert\ConstraintTaxNumber(mode: 'loose')]
+    private string $taxNumber;
+
+
+    public function __construct(private ManagerRegistry $doctrine, private ValidatorInterface $validator)
+    {
+    }
 
     public function __call(string $name, array $arguments): JsonResponse
     {
-        return new JsonResponse([
-            'message' => 'Error call method: '.$name,
-        ],400);
+        return $this->responseErr([
+            'message' => 'Error call method: ' . $name
+        ]);
     }
 
-    public function Product(int $id,string $taxNumber): JsonResponse
+    public function Product(int $id, string $taxNumber): JsonResponse
     {
 
-        try{
+        try {
 
-            if($id==0){
-                return new JsonResponse([
-                    'message' => 'The product Not found',
-                ],400);
+            if ($id == 0) {
+                return $this->responseErr([
+                    'message' => 'The product Not found'
+                ]);
             }
-//            $em = new ProductsRepository($this->doctrine);
+
+            if ($taxNumber) {
+                $this->taxNumber = $taxNumber;
+                $errors = $this->validator->validate($this);
+                if (count($errors) > 0) {
+                    return $this->responseErr(['message' => $errors[0]->getMessage()]);
+                }
+            }
 
             $em = $this->doctrine->getRepository(Products::class);
-            $product =$em->findInfoByProduct($id);
+            $product = $em->findInfoByProduct($id);
 
             if (!$product) {
                 throw new \Exception();
             }
 
-            Pricing::BasePrice($product[0]['price'],$taxNumber);
+            // Получаем цену товара с учётом налогов
+            $product[0]['price'] = Pricing::Price($product[0]['price'], $taxNumber);
 
-            return new JsonResponse($product[0],200);
+            return $this->responseOk($product[0]);
 
-        }catch (\Exception $e){
+        } catch (\Exception $e) {
 
-            $data = [
+            return $this->responseErr([
                 'status' => 400,
                 'errors' => 'Not found product for id ' . $id,
-            ];
+            ]);
 
-            return new JsonResponse($data, 400);
         }
 
     }
@@ -67,53 +79,223 @@ class Api
     public function Order(): JsonResponse
     {
 
+
+        $this->doctrine->getConnection()->beginTransaction();
+
         try {
 
-            $request = new Request();
-
-            $data = $this->transformJsonBody($request);
+            $data = $this->transformJsonBody(new Request());
 
             if (!$data || !$data->request->get('product') || !$data->request->get('paymentProcessor')) {
                 throw new \Exception();
             }
 
             //формирование заказа
+            //+++++++++++++++++++
 
-            $order = new Order();
-            $order->setTaxNumber($data->request->get('taxNumber'));
+            //информация по товару
 
-            $errors = $this->validator->validate($order);
-////            $errors=null;
-//            dump($errors );
+            $taxNumber = $data->request->get('taxNumber');
+            $idProduct = $data->request->get('product');
+
+            $product = $this->doctrine->getRepository(Products::class)
+                ->findInfoByProduct($idProduct);
+
+            if (!$product) {
+                throw new \Exception();
+            }
+
+            $this->taxNumber = $taxNumber;
+            $quantity = (int)$data->request->get('quantity');
+            $paymentProcessor = $data->request->get('paymentProcessor');
+            $couponCode = $data->request?->get('couponCode');
+
+            $errors = $this->validator->validate($this);
 
             if (count($errors) > 0) {
-                // ... this IS a valid
-                $errorsString = (string) $errors;
-//                $errors[0]->getMessage()
-                return new JsonResponse($errors[0]->getMessage(),400);
-            } else {
-                // this is *not* a valid
-                return new JsonResponse($data->request->all(), 200);
+                throw new \Exception($errors[0]->getMessage());
+            }
 
+            //нельзя заказать больше чем есть на остатке или 0
+
+            if ($quantity > $product[0]['deposit']) {
+                throw new \Exception('You cannot order more than what is available.');
+            } else if ($quantity === 0) {
+                throw new \Exception('Please, select quantity more then zero');
+            }
+
+            //
+            $order = new Order();
+            $order->setTaxNumber($taxNumber);
+            $order->setDate(new \DateTime('now'));
+            $order->setCountry(Pricing::Country($taxNumber));
+            $order->setPaymentProcessor($paymentProcessor);
+            $order->setIdUser(1);//for sample
+            $order->setIsPay(0);
+            $order->setTax(Pricing::CountryTax($taxNumber));
+
+            $uuid = Uuid::v4();
+            $order->setHash($uuid);
+
+            if ($couponCode) {
+                //так как кол-во купонов может быть очень большим то делаем выборку из базы
+                $coupon = $this->doctrine->getRepository(Coupons::class)
+                    ->findInfoByCouponCode($couponCode);
+
+                if (!$coupon) {
+                    throw new \Exception('couponCode not Found');
+                }
+
+                $order->setCouponCode($couponCode);
+                $order->setCouponeDiscount($coupon[0]->getVal());
+                $order->setTypeDiscount($coupon[0]->getTypecoupon());
 
             }
 
+            $errors = $this->validator->validate($order);
 
+            if (count($errors) > 0) {
+                throw new \Exception($errors[0]->getMessage());
+            }
+
+            //продолжаем создавать заказ
+
+            $em = $this->doctrine->getManager();
+            $em->persist($order);
+            $em->flush();
+            $OrderId = $order->getId();
+
+            //добавление товара в корзину
+            $cart = new Cart();
+//            dump($quantity);
+            $cart->setQuantity($quantity);
+            $cart->setCouponCode($couponCode)->setIdOrder($OrderId)->setIdProduct($idProduct);
+
+            $cart->setPriceBase($product[0]['price']);//чистая цена товара
+            $cart->setPriceTax(Pricing::Price($product[0]['price'], $taxNumber));//цена с налогом без скидок
+
+            //цена для покупателя
+            $cart->setPrice(
+                Pricing::FinalPrice(
+                    $cart->getPriceTax(),
+                    $taxNumber,
+                    $order->getCouponeDiscount(),
+                    $order->getTypeDiscount()
+                )
+            );
+
+            $errors = $this->validator->validate($cart);
+
+            if (count($errors) > 0) {
+                throw new \Exception($errors[0]->getMessage());
+            }
+
+            $em->persist($cart);
+            $em->flush();
+
+            $em->getConnection()->commit();
+
+            return $this->responseOk(
+                [
+                    'message' => 'Order was created',
+                    'id' => $OrderId,
+                    'hash' => $uuid
+                ]);
 
         } catch (\Exception $e) {
 
+            $this->doctrine->getConnection()->rollBack();
+
             $data = [
-                'status' => 400,
-                'errors' => "Data no valid",
+                'errors' => $e ? $e->getMessage() : "Data no valid"
             ];
 
-            return new JsonResponse($data, 400);
+            return $this->responseErr($data);
 
         }
 
     }
 
-    public function transformJsonBody(Request $request): Request
+    public function payOrder(): JsonResponse
+    {
+        //запрос на оплату заказа
+
+        $this->doctrine->getConnection()->beginTransaction();
+
+        try {
+
+            $data = $this->transformJsonBody(new Request());
+
+            if (!$data || !$data->request->get('idOrder') || !$data->request->get('hash')) {
+                throw new \Exception();
+            }
+
+            $idOrder = $data->request->get('idOrder');
+            $hash = $data->request->get('hash');
+
+            $em = $this->doctrine->getRepository(Order::class);
+            $order = $em->find($idOrder);
+
+            if (!$order) {
+                throw new \Exception('Order not found');
+            } elseif ($order->getHash() != $hash) {
+                throw new \Exception('Order not confirmed');
+            }
+
+            $amount = $em->findAmountByOrder($idOrder);
+
+            if (!$amount) {
+                throw new \Exception('Error on order amount');
+            }
+
+            //начало оплаты
+            $payProcessor = new Payment($order->getPaymentProcessor(), new PayData($amount[0]['amount'], $order));
+
+            $payResult = $payProcessor->payment();
+
+            if (!$payResult['result']) {
+                throw new \Exception('payment error: ' . $payResult['errors']);
+            }
+
+            //обновление заказа
+            //заказ оплачен
+            $order->setIsPay(1); // помечаем заказ как оплаченный
+            $order->setDatePay(new \DateTime('now'));
+
+            $errors = $this->validator->validate($order);
+
+            if (count($errors) > 0) {
+                throw new \Exception($errors[0]->getMessage());
+            }
+
+            $em = $this->doctrine->getManager();
+
+            $em->persist($order);
+            $em->flush();
+
+            $em->getConnection()->commit();
+
+            return $this->responseOk(
+                [
+                    'message' => 'Order paid successfully',
+                    'id' => $idOrder,
+                    'date' => $order->getDatePay()
+                ]);
+
+        } catch (\Exception $e) {
+
+            $this->doctrine->getConnection()->rollBack();
+
+            return new JsonResponse([
+                'errors' => $e ? $e->getMessage() : "Data no valid"
+            ], 400);;
+
+        }
+
+
+    }
+
+    private function transformJsonBody(Request $request): Request
     {
         $data = json_decode($request->getContent(), true);
 
@@ -126,22 +308,14 @@ class Api
         return $request;
     }
 
-    private function getTax(string $taxNumber): int
+    private function responseOk(array $res): JsonResponse
     {
+        return new JsonResponse($res, 200);
+    }
 
-//        Германии - 19%
-//        Италии - 22%
-//        Греции - 24%
-
-        $country=substr($taxNumber,2);
-
-        return match ($country) {
-            'DE' => 19,
-            'IT' => 22,
-            'GR' => 24,
-            'FR' => 20,
-            default => 0
-        };
+    private function responseErr(array $res): JsonResponse
+    {
+        return new JsonResponse($res, 400);
     }
 
 }

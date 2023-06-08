@@ -39,6 +39,18 @@ class CouponsRepository extends ServiceEntityRepository
         }
     }
 
+
+    public function findInfoByCouponCode($value): array
+    {
+        return $this->createQueryBuilder('c')
+            ->andWhere('c.title = :val')
+            ->setParameter('val', $value)
+//            ->orderBy('c.id', 'ASC')
+            ->setMaxResults(1)
+            ->getQuery()
+            ->getResult()
+        ;
+    }
 //    /**
 //     * @return Coupons[] Returns an array of Coupons objects
 //     */

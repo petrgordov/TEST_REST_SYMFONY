@@ -39,6 +39,21 @@ class OrderRepository extends ServiceEntityRepository
         }
     }
 
+    public function findAmountByOrder(int $idOrder): array
+    {
+
+        $conn = $this->getEntityManager()->getConnection();
+
+        $sql = '
+            SELECT SUM(price * quantity) amount FROM cart  WHERE id_order = :id  ';
+        $stmt = $conn->prepare($sql);
+        $resultSet = $stmt->executeQuery(['id' => $idOrder]);
+
+        // returns an array of arrays (i.e. a raw data set)
+        return $resultSet->fetchAllAssociative();
+
+    }
+
 //    /**
 //     * @return Order[] Returns an array of Order objects
 //     */
