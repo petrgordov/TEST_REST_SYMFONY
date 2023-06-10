@@ -27,7 +27,7 @@ class Payment
 
             //Ошибка на стороне платёжного шлюза
             if (!$this->pProcessor->getResult()) {
-                throw new Exception('Error on the side of the payment gateway');
+                throw new \Exception('Error on the side of the payment gateway:'.$this?->pProcessor->getError());
             }
 
             return ['result' => true, 'message' => 'payment accepted'];

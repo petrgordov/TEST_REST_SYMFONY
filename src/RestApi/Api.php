@@ -178,13 +178,14 @@ class Api
                 $cart->setPriceTax(Pricing::Price($product[0]['price'], $taxNumber));//цена с налогом без скидок
 
                 //цена для покупателя
+                $price=Pricing::FinalPrice(
+                    $cart->getPriceTax() * $quantity,
+                    $taxNumber,
+                    $order->getCouponeDiscount(),
+                    $order->getTypeDiscount()
+                );
                 $cart->setPrice(
-                    Pricing::FinalPrice(
-                        $cart->getPriceTax() * $quantity,
-                        $taxNumber,
-                        $order->getCouponeDiscount(),
-                        $order->getTypeDiscount()
-                    )
+                    $price
                 );
 
                 $errors = $this->validator->validate($cart);
@@ -202,11 +203,11 @@ class Api
                     [
                         'message' => 'Order was created',
                         'id' => $OrderId,
+                        'amount' => $price,
                         'hash' => $uuid
                     ]);
 
             } else {
-
                 $errors = $form->getErrors(true, false);
                 throw new \Exception($errors);
             }

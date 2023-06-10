@@ -32,7 +32,7 @@ class Pricing
             $price= $total - $discount;
         }
 
-        return  self::Price((float)$price,$code);;
+        return  round(self::Price((float)$price,$code),2);
     }
 
     //расчёт налога
