@@ -34,12 +34,6 @@ class ConstraintTaxNumberValidator extends ConstraintValidator
             // throw new UnexpectedValueException($value, 'string|int');
         }
 
-        // access your configuration options like this:
-        if ('strict' === $constraint->mode) {
-            // ...
-
-        }
-
         if (!preg_match('/^[a-zA-Z]{2}(([a-zA-Z]{2})?([0-9]+))$/', $value, $matches)) {
             // the argument must be a string or an object implementing __toString()
             $this->context->buildViolation($constraint->message)

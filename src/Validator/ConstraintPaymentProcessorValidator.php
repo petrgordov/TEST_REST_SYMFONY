@@ -34,13 +34,6 @@ class ConstraintPaymentProcessorValidator extends ConstraintValidator
             // throw new UnexpectedValueException($value, 'string|int');
         }
 
-        // access your configuration options like this:
-        if ('strict' === $constraint->mode) {
-            // ...
-
-        }
-
-
         if (!match ($value){
             'paypal'=>true,
             default => false

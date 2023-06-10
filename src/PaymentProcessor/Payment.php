@@ -9,6 +9,7 @@ class Payment
     public function __construct(string $paymentProcessor, private PayData $payData)
     {
         // подключаем нужный процессор оплаты
+        // можно добавить сколько угодно
         $this->pProcessor = match ($paymentProcessor) {
             'paypal' => new PaypalPaymentProcessor(),
             default => fn() => throw new Exception('Pay processor not exists')
